@@ -1,0 +1,110 @@
+name: HKJC-OTEL-POC
+services:
+  log-testing:
+    image: log-testing
+    container_name: log-testing
+    environment:
+      #### Environment Variables for DD Tracer ####
+      - DD_AGENT_HOST=dd_agent
+      - DD_TRACE_OTEL_ENABLED=true ## Force DD to use OTel trace ID. Otherwise, custom instrumentation part in code will use DD trace ID.
+      # - DD_TAGS=instrument_tag:ddtracer
+      - DD_LOGS_INJECTION=true
+    ports:
+      - "8080:8080"
+    networks:
+      - otel-example
+    
+    #### Java options for DD tracer ####       
+    command: >
+      java -javaagent:/app/dd-java-agent.jar
+      -Ddd.profiling.enabled=true
+      -XX:FlightRecorderOptions=stackdepth=256
+      -Ddd.logs.injection=true
+      -Ddd.service=log-testing
+      -Ddd.env=staging
+      -Ddd.version=1.0-log-testing
+      -Ddd.trace.propagation.style=tracecontext
+      -Ddd.dbm.propagation.mode=full
+      -Ddd.dbm.trace_prepared_statements=true
+      -Ddd.integration.jdbc-datasource.enabled=true
+      -jar /app/demo-0.0.1-SNAPSHOT.war
+    depends_on:
+      - dd-agent
+
+    # labels:
+    #   - "com.datadoghq.ad.logs=[{\"type\": \"docker\", \"source\": \"java\", \"service\": \"hkjc-otel-poc-ddtracer-backend\", \"sourcecategory\": \"java\"}]"
+  dd-agent:
+    cgroup: host
+    pid: host
+    container_name: dd_agent
+    environment:
+      - DD_API_KEY=d361165de74819d5e2399a9c9f8a1694 
+      - DD_SITE=datadoghq.com
+      - DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT=0.0.0.0:4317
+      - DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT=0.0.0.0:4318
+      - DD_LOGS_ENABLED=true
+      - DD_LOGS_CONFIG_CONTAINER_COLLECT_ALL=true
+      - DD_OTLP_CONFIG_LOGS_ENABLED=true
+      - DD_APM_ENABLED=true
+      - DD_APM_NON_LOCAL_TRAFFIC=true # Receive APM data from other containers
+      - DD_DOGSTATSD_NON_LOCAL_TRAFFIC=true # Receive metrics from other containers
+      - DD_APM_RECEIVER_SOCKET=/opt/datadog/apm/inject/run/apm.socket
+      - DD_PROCESS_AGENT_ENABLED=true
+      #- DD_SYSTEM_PROBE_NETWORK_ENABLED=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc/:/host/proc/:ro
+      - /sys/fs/cgroup/:/host/sys/fs/cgroup:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      # - ./hkjc-otel-poc-ddtracer-backend_log_conf.yaml:/conf.d/java.d/conf.yaml # Enable Java logs
+    ports:
+      # - "16686:16686"
+      - 4317:4317
+      - 8126:8126/tcp
+      - "4318:4318"
+    image: gcr.io/datadoghq/agent:latest
+    cap_add:
+      - SYS_ADMIN
+      - SYS_RESOURCE
+      - SYS_PTRACE
+      - NET_ADMIN
+      - NET_BROADCAST
+      - NET_RAW
+      - IPC_LOCK
+      - CHOWN
+    security_opt:
+      - apparmor:unconfined
+    networks:
+      - otel-example
+  # jaeger:
+  #   image: jaegertracing/all-in-one:latest
+  #   container_name: jaeger
+  #   ports:
+  #     - "16686:16686"
+  #     - "43170:4317"
+  #     - "43180:4318"
+  #   environment:
+  #     - LOG_LEVEL=debug
+  #   networks:
+  #     - otel-example
+
+  
+  # otel-collector:
+  #   ports:
+  #       - 4317:4317
+  #   container_name: otel_collector
+  #   volumes:
+  #       - ./otel_collector_config.yaml:/etc/otelcol-contrib/config.yaml
+  #   image: otel/opentelemetry-collector-contrib
+  #   networks:
+  #     - otel-example
+  # netshoot:
+  #   image: nicolaka/netshoot
+  #   command: tail -f /dev/null
+  #   privileged: true
+  #   networks:
+  #     - otel-example
+
+
+networks:
+  otel-example:
