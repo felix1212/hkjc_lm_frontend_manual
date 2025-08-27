@@ -1,11 +1,17 @@
+/*
+ * Change Log:
+ * 1.0.2.2 - Added health check endpoint
+ * 1.1 - Added OpenTelemetry Mode Config
+ */
+
 package com.example.demo;
 
-import io.opentelemetry.api.GlobalOpenTelemetry;
+//import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
-import io.opentelemetry.context.propagation.TextMapSetter;
+// import io.opentelemetry.context.propagation.TextMapSetter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +27,7 @@ public class ApiController {
     private static final Logger logger = LoggerFactory.getLogger(ApiController.class);
     private final RestTemplate restTemplate;
     private final Tracer tracer;
+    private final OpenTelemetryModeConfig otelModeConfig;
 
     @Value("${dd.query.url}")
     private String ddQueryUrl;
@@ -40,17 +47,42 @@ public class ApiController {
     @Value("${otel.truncate.url}")
     private String otelTruncateUrl;
 
-    private static final TextMapSetter<HttpHeaders> setter = (carrier, key, value) -> {
-        if (carrier != null) {
-            carrier.set(key, value);
-        }
-    };
+    // private static final TextMapSetter<HttpHeaders> setter = (carrier, key, value) -> {
+    //     if (carrier != null) {
+    //         carrier.set(key, value);
+    //     }
+    // };
 
     @Autowired
-    public ApiController(RestTemplate restTemplate, Tracer tracer) {
+    public ApiController(RestTemplate restTemplate, Tracer tracer, OpenTelemetryModeConfig otelModeConfig) {
         this.restTemplate = restTemplate;
         this.tracer = tracer;
+        this.otelModeConfig = otelModeConfig;
     }
+
+    /**
+     * Health check
+     */
+    @GetMapping("/health")
+    public ResponseEntity<String> healthCheck() {
+        Span span = tracer.spanBuilder("health-check-span").startSpan();
+        try (var scope = Context.current().with(span).makeCurrent()) {
+            logger.info("Starting span: {}", "health-check-span");
+            logger.info("Trace ID: {}", span.getSpanContext().getTraceId());
+            logger.info("OpenTelemetry Mode: {}", otelModeConfig.getModeDescription());
+            
+            String response = String.format("OK - OpenTelemetry Mode: %s", otelModeConfig.getModeDescription());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            span.setStatus(StatusCode.ERROR, "Error processing request");
+            logger.error("Error calling {}: {}", "/health", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Internal Server Error");
+        } finally {
+            span.end();
+        }
+    }
+
+
 
     /**
      * Query table via DD backend

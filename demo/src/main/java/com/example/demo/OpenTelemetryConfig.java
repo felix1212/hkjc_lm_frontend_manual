@@ -16,6 +16,7 @@ import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import io.opentelemetry.exporter.logging.LoggingSpanExporter;
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator;
 import io.opentelemetry.context.propagation.ContextPropagators;
+import io.opentelemetry.sdk.trace.export.SpanExporter;
 
 @Configuration
 public class OpenTelemetryConfig {
@@ -32,8 +33,19 @@ public class OpenTelemetryConfig {
     @Value("${service.version}")
     private String serviceVersion;
 
+    @Value("${otel.sdk.enabled:true}")
+    private boolean otelSdkEnabled;
+
     @Bean
     public OpenTelemetry openTelemetry() {
+        if (otelSdkEnabled) {
+            return createSdkOpenTelemetry();
+        } else {
+            return createApiOnlyOpenTelemetry();
+        }
+    }
+
+    private OpenTelemetry createSdkOpenTelemetry() {
         // OtlpGrpcSpanExporter spanExporter = OtlpGrpcSpanExporter.builder()
         //         .setEndpoint(otelEndpoint)
         //         .build();
@@ -44,6 +56,43 @@ public class OpenTelemetryConfig {
         SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
             .addSpanProcessor(BatchSpanProcessor.builder(otlpHttpSpanExporter).build())
             .addSpanProcessor(SimpleSpanProcessor.create(LoggingSpanExporter.create()))
+            .setResource(Resource.create(Attributes.of(
+                    AttributeKey.stringKey("service.name"), serviceName,
+                    AttributeKey.stringKey("deployment.environment"), environment,
+                    AttributeKey.stringKey("service.version"), serviceVersion
+            )))
+            .build();
+
+        OpenTelemetry openTelemetry = OpenTelemetrySdk.builder()
+            .setPropagators(ContextPropagators.create(W3CTraceContextPropagator.getInstance()))
+            .setTracerProvider(tracerProvider)
+            .buildAndRegisterGlobal();
+
+        return openTelemetry;
+    }
+
+    private OpenTelemetry createApiOnlyOpenTelemetry() {
+        // Create SDK with a custom no-op span exporter - spans will be created but not exported
+        SpanExporter noopExporter = new SpanExporter() {
+            @Override
+            public io.opentelemetry.sdk.common.CompletableResultCode export(java.util.Collection<io.opentelemetry.sdk.trace.data.SpanData> spans) {
+                // Do nothing - this is a no-op exporter
+                return io.opentelemetry.sdk.common.CompletableResultCode.ofSuccess();
+            }
+
+            @Override
+            public io.opentelemetry.sdk.common.CompletableResultCode flush() {
+                return io.opentelemetry.sdk.common.CompletableResultCode.ofSuccess();
+            }
+
+            @Override
+            public io.opentelemetry.sdk.common.CompletableResultCode shutdown() {
+                return io.opentelemetry.sdk.common.CompletableResultCode.ofSuccess();
+            }
+        };
+
+        SdkTracerProvider tracerProvider = SdkTracerProvider.builder()
+            .addSpanProcessor(SimpleSpanProcessor.create(noopExporter))
             .setResource(Resource.create(Attributes.of(
                     AttributeKey.stringKey("service.name"), serviceName,
                     AttributeKey.stringKey("deployment.environment"), environment,
