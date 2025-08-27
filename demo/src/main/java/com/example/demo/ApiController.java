@@ -2,6 +2,7 @@
  * Change Log:
  * 1.0.2.2 - Added health check endpoint
  * 1.1 - Added OpenTelemetry Mode Config
+ * 1.1.1 - Added health check span creation switch
  */
 
 package com.example.demo;
@@ -47,6 +48,9 @@ public class ApiController {
     @Value("${otel.truncate.url}")
     private String otelTruncateUrl;
 
+    @Value("${health.check.otel.enabled}")
+    private boolean healthCheckOtelEnabled;
+
     // private static final TextMapSetter<HttpHeaders> setter = (carrier, key, value) -> {
     //     if (carrier != null) {
     //         carrier.set(key, value);
@@ -65,12 +69,17 @@ public class ApiController {
      */
     @GetMapping("/health")
     public ResponseEntity<String> healthCheck() {
+        if (!healthCheckOtelEnabled) {
+            logger.info("Health check span creation disabled. Returning without creating span.");
+            return ResponseEntity.ok("OK - health check span disabled (no span created)");
+        }
+
         Span span = tracer.spanBuilder("health-check-span").startSpan();
         try (var scope = Context.current().with(span).makeCurrent()) {
             logger.info("Starting span: {}", "health-check-span");
             logger.info("Trace ID: {}", span.getSpanContext().getTraceId());
             logger.info("OpenTelemetry Mode: {}", otelModeConfig.getModeDescription());
-            
+
             String response = String.format("OK - OpenTelemetry Mode: %s", otelModeConfig.getModeDescription());
             return ResponseEntity.ok(response);
         } catch (Exception e) {
